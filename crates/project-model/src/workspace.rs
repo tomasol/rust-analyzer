@@ -2,7 +2,9 @@
 //! metadata` or `rust-project.json`) into representation stored in the salsa
 //! database -- `CrateGraph`.
 
-use std::{collections::VecDeque, fmt, fs, iter, process::Command, str::FromStr, sync};
+use std::{
+    collections::VecDeque, fmt, fs, iter, path::PathBuf, process::Command, str::FromStr, sync,
+};
 
 use anyhow::{format_err, Context};
 use base_db::{
@@ -465,16 +467,24 @@ impl ProjectWorkspace {
             | ProjectWorkspace::DetachedFiles { sysroot: Ok(sysroot), .. } => {
                 let standalone_server_name =
                     format!("rust-analyzer-proc-macro-srv{}", std::env::consts::EXE_SUFFIX);
-                ["libexec", "lib"]
-                    .into_iter()
-                    .map(|segment| sysroot.root().join(segment).join(&standalone_server_name))
-                    .find(|server_path| std::fs::metadata(server_path).is_ok())
-                    .ok_or_else(|| {
-                        anyhow::format_err!(
-                            "cannot find proc-macro server in sysroot `{}`",
-                            sysroot.root()
-                        )
-                    })
+                [
+                    std::env::current_exe()
+                        .ok()
+                        .and_then(|exe| exe.parent().map(|parent| parent.to_path_buf()))
+                        .and_then(|dir| AbsPathBuf::try_from(dir).ok()),
+                    Some(sysroot.root().join(PathBuf::from("libexec"))),
+                    Some(sysroot.root().join(PathBuf::from("lib"))),
+                ]
+                .into_iter()
+                .filter_map(|v| v)
+                .map(|dir| dir.join(&standalone_server_name))
+                .find(|server_path| std::fs::metadata(server_path).is_ok())
+                .ok_or_else(|| {
+                    anyhow::format_err!(
+                        "cannot find proc-macro server in sysroot `{}`",
+                        sysroot.root()
+                    )
+                })
             }
             ProjectWorkspace::DetachedFiles { .. } => {
                 Err(anyhow::format_err!("cannot find proc-macro server, no sysroot was found"))
